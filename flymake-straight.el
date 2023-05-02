@@ -129,6 +129,5 @@ REPORT-FN when done."
                #'flymake-straight-elisp-flymake-byte-compile t)
   (flymake-mode 1))
 
-
 (provide 'flymake-straight)
 ;;; flymake-straight.el ends here
