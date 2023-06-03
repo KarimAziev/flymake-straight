@@ -65,6 +65,11 @@
 	:group 'flymake-straight
 	:type '(repeat (string :tag "File name base")))
 
+(defcustom flymake-straight-use-package-features	'(use-package-ensure-system-package)
+	"List of additional `use-package' features to require."
+	:group 'flymake-straight
+	:type '(repeat (symbol :tag "Feature")))
+
 (defcustom flymake-straight-package-lint-enable-p t
 	"Whether to run setup `package-lint-flymake' in straight repositories.
 If the value is a function it will be called without arguments."
@@ -84,6 +89,8 @@ Runs in a batch-mode Emacs.  Interactively use variable
 	(straight-use-package 'use-package)
 	(straight-use-package-mode t)
 	(require 'use-package-core)
+	(dolist (sym flymake-straight-use-package-features)
+		(require sym nil t))
 	(let* ((file
 					(or file
 							(car command-line-args-left)))
