@@ -1,4 +1,4 @@
-;;; flymake-straight.el --- Configure flymake -*- lexical-binding: t -*-
+;;; flymake-straight.el --- A Flymake backend that integrate use-package and straight.el -*- lexical-binding: t -*-
 
 ;; Copyright (C) Karim Aziiev <karim.aziiev@gmail.com>
 
@@ -48,18 +48,30 @@
 (eval-when-compile (require 'cl-lib))
 (eval-when-compile (require 'subr-x))
 
-(defvar flymake-straight-source-file (if load-in-progress load-file-name
-																			 buffer-file-name))
-
-(defvar flymake-straight-directory (file-name-directory
-																		flymake-straight-source-file))
-
-
+(defvar flymake-straight-source-file (if load-in-progress
+																				 load-file-name buffer-file-name))
 
 (declare-function straight-use-package "straight.el")
 (declare-function straight--repos-dir "straight.el")
+(declare-function straight-use-package-mode "straight.el")
 (declare-function package-lint-flymake-setup "package-lint-flymake.el")
 
+(defcustom flymake-straight-ignored-files '(".dir-locals"
+																						"custom"
+																						"filesets-cache"
+																						"company-statistics-cache"
+																						"saveplace" "savehist")
+	"List of symbols or files to ignore."
+	:group 'flymake-straight
+	:type '(repeat (string :tag "File name base")))
+
+(defcustom flymake-straight-package-lint-enable-p t
+	"Whether to run setup `package-lint-flymake' in straight repositories.
+If the value is a function it will be called without arguments."
+	:group 'flymake-straight
+	:type '(choice
+					(boolean :tag "Start if available" t)
+					(function :tag "Custom function")))
 
 (defun flymake-straight--batch-compile-for-flymake (&optional file)
 	"Helper for `flymake-straight-elisp-flymake-byte-compile'.
@@ -70,11 +82,8 @@ Runs in a batch-mode Emacs.  Interactively use variable
 	(setq-default straight-use-package-by-default t)
 	(require 'straight)
 	(straight-use-package 'use-package)
-	(setq-default use-package-verbose t
-                use-package-expand-minimally nil
-                use-package-compute-statistics t)
-	(setq-default straight-use-package-by-default t)
-	(require 'straight)
+	(straight-use-package-mode t)
+	(require 'use-package-core)
 	(let* ((file
 					(or file
 							(car command-line-args-left)))
@@ -99,18 +108,9 @@ Runs in a batch-mode Emacs.  Interactively use variable
 		(pp collected)))
 
 
+
 (defvar-local flymake-straight-elisp-flymake--byte-compile-process nil
   "Buffer-local process started for byte-compiling the buffer.")
-
-(defvar flymake-straight-elisp-flymake-byte-compile-load-path (list "./")
-  "Like `load-path' but used by `flymake-straight-elisp-flymake-byte-compile'.
-The default value contains just \"./\" which includes the default
-directory of the buffer being compiled, and nothing else.")
-
-(put 'flymake-straight-elisp-flymake-byte-compile-load-path 'safe-local-variable
-     (lambda (x) (and (listp x) (catch 'tag
-                                  (dolist (path x t) (unless (stringp path)
-                                                       (throw 'tag nil)))))))
 
 (defun flymake-straight--flymake--byte-compile-done (report-fn source-buffer
 																															 output-buffer)
@@ -151,6 +151,30 @@ OUTPUT-BUFFER containing the diagnostics."
                            level
                            string)))))) )
 
+(defun flymake-straight-get-args (temp-file)
+	"Return Emacs arguments to compile and check a file TEMP-FILE."
+	`(,(expand-file-name invocation-name invocation-directory)
+		"--batch"
+		"--eval" "(setq load-prefer-newer t)"
+		,@(mapcan (lambda (path)
+								(list "-L" path))
+							(append (list "./")
+											(seq-remove
+											 (lambda (it)
+												 (and
+													(string=
+													 (file-name-nondirectory
+														(directory-file-name
+														 it))
+													 "use-package")
+													(not
+													 (file-in-directory-p it
+																								user-emacs-directory))))
+											 load-path)))
+		"-l" ,flymake-straight-source-file
+		"-f" "flymake-straight--batch-compile-for-flymake"
+    ,temp-file))
+
 (defun flymake-straight-elisp-flymake-byte-compile (report-fn &rest _args)
 	"A Flymake backend for elisp files with `use-package' forms with :straight.
 Spawn an Emacs process, activate `straight-use-package-mode',
@@ -176,58 +200,39 @@ REPORT-FN when done."
        (make-process
         :name "flymake-straight-elisp-flymake-byte-compile"
         :buffer output-buffer
-        :command `(,(expand-file-name invocation-name invocation-directory)
-                   "-Q"
-                   "--batch"
-                   ,@(mapcan (lambda (path)
-                               (list "-L" path))
-                             (seq-remove
-															(lambda (it)
-																(and
-																 (string=
-																	(file-name-nondirectory
-																	 (directory-file-name
-																		it))
-																	"use-package")
-																 (not
-																	(file-in-directory-p it
-																											 user-emacs-directory))))
-															load-path))
-									 "--eval" "(setq load-prefer-newer t)"
-									 "-l" ,flymake-straight-source-file
-									 "-f" "flymake-straight--batch-compile-for-flymake"
-									 ,temp-file)
+        :command (flymake-straight-get-args temp-file)
         :connection-type 'pipe
         :sentinel
         (lambda (proc _event)
           (unless (process-live-p proc)
             (unwind-protect
-                (cond ((not
-                        (and (buffer-live-p source-buffer)
-                             (eq proc
+								(cond ((not
+												(and (buffer-live-p source-buffer)
+														 (eq proc
 																 (with-current-buffer source-buffer
-                                   flymake-straight-elisp-flymake--byte-compile-process))))
-                       (flymake-log :warning
-                                    "flymake straight: byte-compile process %s obsolete"
+																	 flymake-straight-elisp-flymake--byte-compile-process))))
+											 (flymake-log :warning
+																		"flymake straight: byte-compile process %s obsolete"
 																		proc))
-                      ((zerop (process-exit-status proc))
-                       (flymake-straight--flymake--byte-compile-done report-fn
+											((zerop (process-exit-status proc))
+											 (flymake-straight--flymake--byte-compile-done report-fn
 																																		 source-buffer
 																																		 output-buffer))
-                      (t
-                       (funcall report-fn
-                                :panic
-                                :explanation
-                                (format "byte-compile process %s died" proc))))
+											(t
+											 (funcall report-fn
+																:panic
+																:explanation
+																(format "byte-compile process %s died" proc))))
 							(ignore-errors (delete-file temp-file))
               (kill-buffer output-buffer))))
         :stderr " *stderr of flymake-straight-elisp-flymake-byte-compile*"
         :noquery t)))))
 
-;;;###autoload
-(defun flymake-straight-on ()
-	"Add `flymake-straight-elisp-flymake-byte-compile' to flymake diagnostic."
-	(interactive)
+
+(defun flymake-straight-setup-on ()
+	"Add `flymake-straight-elisp-flymake-byte-compile' to flymake diagnostic.
+Also remove `elisp-flymake-byte-compile' from diagnostic and reactivate
+`flymake-mode'."
 	(if (bound-and-true-p flymake-mode)
 			(flymake-mode -1)
 		(require 'flymake))
@@ -238,14 +243,34 @@ REPORT-FN when done."
   (flymake-mode 1))
 
 ;;;###autoload
-(defun flymake-straight-off ()
-  "Remove `flymake-straight-elisp-flymake-byte-compile' to flymake diagnostic."
-  (interactive)
-  (require 'flymake)
-  (flymake-mode -1)
+(defun flymake-straight-on ()
+	"Add `flymake-straight-elisp-flymake-byte-compile' to flymake diagnostic.
+Also remove `elisp-flymake-byte-compile' from diagnostic and reactivate
+`flymake-mode'."
+	(interactive)
+  (flymake-straight-setup-on))
+
+(defun flymake-straight-setup-off ()
+	"Remove `flymake-straight-elisp-flymake-byte-compile' from flymake diagnostic.
+Also add `elisp-flymake-byte-compile' from diagnostic and reactivate
+`flymake-mode'."
+	(require 'flymake)
+	(if (bound-and-true-p flymake-mode)
+			(flymake-mode -1)
+		(require 'flymake))
   (remove-hook 'flymake-diagnostic-functions
                #'flymake-straight-elisp-flymake-byte-compile t)
+  (add-hook 'flymake-diagnostic-functions
+            #'elisp-flymake-byte-compile nil t)
   (flymake-mode 1))
+
+;;;###autoload
+(defun flymake-straight-off ()
+	"Remove `flymake-straight-elisp-flymake-byte-compile' from flymake diagnostic.
+Also add `elisp-flymake-byte-compile' from diagnostic and reactivate
+`flymake-mode'."
+	(interactive)
+	(flymake-straight-setup-off))
 
 (defun flymake-straight-fix-package-lint ()
 	"And melpa to package archives and load `package-archive-contents'."
@@ -260,44 +285,56 @@ REPORT-FN when done."
       (package-initialize t)
       (package-refresh-contents t))))
 
-;;;###autoload
-(defun flymake-straight-flymake-elisp-mode-init ()
-	"Init flymake for `emacs-listp-mode'."
+(defun flymake-straight-enable-package-lint ()
+	"Enable package lint if available.
+See also `flymake-straight-package-lint-enable-p'."
+	(when (and
+				 (or
+					(eq flymake-straight-package-lint-enable-p t)
+					(when (functionp flymake-straight-package-lint-enable-p)
+						(funcall flymake-straight-package-lint-enable-p)))
+				 (featurep 'package-lint))
+		(flymake-straight-fix-package-lint)
+		(require 'package-lint-flymake)
+		(package-lint-flymake-setup)))
+
+
+(defun flymake-straight--elisp-auto-setup ()
+	"Enable and setup `flymake-mode' with different backends based on the filename.
+In `straight--repos-dir' the function will setup `package-lint-flymake',
+in `user-emacs-directory' replace `elisp-flymake-byte-compile' with
+`flymake-straight-elisp-flymake-byte-compile'."
 	(remove-hook 'flymake-diagnostic-functions 'flymake-proc-legacy-flymake)
 	(let ((buffname (buffer-name (current-buffer))))
 		(cond ((string= buffname "*Pp Eval Output*"))
-					((not buffer-file-name) nil)
-					((or
-						(when (fboundp 'straight--repos-dir)
-							(file-in-directory-p buffer-file-name (straight--repos-dir)))
-						(when (boundp 'elpaca-repos-directory)
-							(file-in-directory-p buffer-file-name
-																	 (expand-file-name "melpazoid"
-																										 elpaca-repos-directory))))
-					 (flymake-straight-fix-package-lint)
-					 (require 'package-lint-flymake nil t)
-					 (package-lint-flymake-setup)
-					 (flymake-mode 1))
-					((and (file-in-directory-p buffer-file-name user-emacs-directory)
-								(not (member (file-name-base buffer-file-name)
-														 '(".dir-locals"
-															 "custom"
-															 "filesets-cache"
-															 "company-statistics-cache"
-															 "saveplace" "savehist"))))
+					((or (not buffer-file-name)
+							 (member (file-name-extension buffer-file-name)
+											 (list "elc")))
+					 nil)
+					((when (fboundp 'straight--repos-dir)
+						 (file-in-directory-p buffer-file-name (straight--repos-dir)))
 					 (setq-local elisp-flymake-byte-compile-load-path
 											 (append
 												elisp-flymake-byte-compile-load-path
 												load-path))
-					 (remove-hook 'flymake-diagnostic-functions
-												'package-lint-flymake t)
-					 (remove-hook 'flymake-diagnostic-functions
-												#'elisp-flymake-byte-compile t)
-					 (add-hook 'flymake-diagnostic-functions
-										 #'flymake-straight-elisp-flymake-byte-compile nil t)
+					 (flymake-straight-enable-package-lint)
 					 (flymake-mode 1))
-					(t (remove-hook 'flymake-diagnostic-functions
-													'package-lint-flymake t)))))
+					((and (file-in-directory-p buffer-file-name user-emacs-directory)
+								(not (member (file-name-base buffer-file-name)
+														 flymake-straight-ignored-files)))
+					 (flymake-straight-setup-on)))))
+
+;;;###autoload
+(defun flymake-straight-flymake-elisp-mode-init ()
+	"Enable and setup `flymake-mode' with different backends based on the filename.
+In `straight--repos-dir' the function will setup `package-lint-flymake',
+in `user-emacs-directory' replace `elisp-flymake-byte-compile' with
+`flymake-straight-elisp-flymake-byte-compile'."
+	(interactive)
+	(flymake-straight--elisp-auto-setup))
 
 (provide 'flymake-straight)
 ;;; flymake-straight.el ends here
+;; Local Variables:
+;; after-save-hook: (lambda () (setq flymake-straight-source-file (buffer-file-name)) (eval-buffer))
+;; End:
