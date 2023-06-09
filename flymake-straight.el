@@ -50,6 +50,7 @@
 
 (defvar flymake-straight-source-file (if load-in-progress
 																				 load-file-name buffer-file-name))
+(declare-function lm-get-header-re "lisp-mnt")
 
 (declare-function straight-use-package "straight.el")
 (declare-function straight--repos-dir "straight.el")
@@ -300,9 +301,18 @@ See also `flymake-straight-package-lint-enable-p'."
 					(eq flymake-straight-package-lint-enable-p t)
 					(when (functionp flymake-straight-package-lint-enable-p)
 						(funcall flymake-straight-package-lint-enable-p)))
-				 (featurep 'package-lint))
+				 (save-match-data
+					 (save-excursion
+						 (save-restriction
+							 (require 'lisp-mnt)
+							 (widen)
+							 (goto-char (point-min))
+							 (re-search-forward
+								(lm-get-header-re (rx (or "Version" "Package-Version"
+																					"Package-Requires")))
+								nil t)))))
 		(flymake-straight-fix-package-lint)
-		(require 'package-lint-flymake)
+		(require 'package-lint-flymake nil t)
 		(package-lint-flymake-setup)))
 
 
