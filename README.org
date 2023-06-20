@@ -1,7 +1,7 @@
 #+OPTIONS: ^:nil
 
 * About
-A Flymake backend that integrate use-package and straight.el.
+A Flymake backend for linting user Emacs configs based on [[https://github.com/radian-software/straight.el][straight.el]].
 
 * Table of Contents                                       :TOC_2_gh:QUOTE:noexport:
 #+BEGIN_QUOTE
@@ -28,7 +28,7 @@ A Flymake backend that integrate use-package and straight.el.
              :repo "KarimAziev/flymake-straight"
              :type git
              :host github)
-	:hook (emacs-lisp-mode . flymake-straight-flymake-elisp-mode-init))
+  :hook (emacs-lisp-mode . flymake-straight-flymake-elisp-mode-init))
 #+end_src
 
 ** Manual installation
