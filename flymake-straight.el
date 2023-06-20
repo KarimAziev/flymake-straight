@@ -75,22 +75,31 @@
   :group 'flymake-straight
   :type '(repeat (symbol :tag "Feature")))
 
-(defcustom flymake-straight-package-lint-enable-p 'flymake-straight-user-mail-package-author-p
-  "Whether to run setup `package-lint-flymake' in straight repositories.
-If the value is a function it will be called without arguments."
-  :group 'flymake-straight
-  :type '(choice
-          (boolean :tag "Start if available" t)
-          (function :tag "Custom function")))
+(defcustom flymake-straight-package-lint-predicate '(flymake-straight-user-mail-package-author-p)
+  "Whether to enable `package-lint-flymake' in straight repositories.
 
-(defcustom flymake-straight-checkdoc-lint-enable-p 'flymake-straight-user-mail-package-author-p
-  "Predicate for `elisp-flymake-checkdoc'.
-If the value is a function it will be called without arguments and should return
-nil if checkdoc should be disabled."
+If the value is a function, it will be called without arguments and should
+return non nil if checkdoc should be enabled, othervise - disabled.
+
+If the value a list of functions, all predicates must returns non nil."
   :group 'flymake-straight
   :type '(choice
           (boolean :tag "Start if available" t)
-          (function :tag "Custom function")))
+          (function :tag "Function predicate")
+          (repeat (function :tag "List of predicates"))))
+
+(defcustom flymake-straight-checkdoc-predicate '(flymake-straight-user-mail-package-author-p)
+  "Whether to enable `elisp-flymake-checkdoc' in straight directories.
+
+If the value is a function, it will be called without arguments and should
+return non nil if checkdoc should be enabled, othervise - disabled.
+
+If the value a list of functions, all predicates must returns non nil."
+  :group 'flymake-straight
+  :type '(choice
+          (boolean :tag "Start if available" t)
+          (function :tag "Function predicate")
+          (repeat (function :tag "Function predicate"))))
 
 (defun flymake-straight--batch-compile-for-flymake (&optional file)
   "Helper for `flymake-straight-elisp-flymake-byte-compile'.
@@ -316,6 +325,15 @@ Also add `elisp-flymake-byte-compile' from diagnostic and reactivate
                                    "Package-Requires")))
          nil t)))))
 
+(defun flymake-straight-all-pass (filters)
+  "Create an unary predicate function from FILTERS.
+Return t if every one of the provided predicates is satisfied by provided
+ argument."
+  (not (catch 'found
+           (dolist (filter filters)
+             (unless (funcall filter)
+               (throw 'found t))))))
+
 (defun flymake-straight-user-mail-package-author-p ()
   "Return non nil if `user-mail-address' is listed in package header's author.
 If `user-mail-address' is nil, return t."
@@ -326,30 +344,50 @@ If `user-mail-address' is nil, return t."
                                             user-mail-address))
          (lm-header-multiline "Author")))))
 
+(defun flymake-straight-in-straight-dir ()
+  "Return non if current file is in `straight--repos-dir'."
+  (when buffer-file-name
+    (file-in-directory-p buffer-file-name (straight--repos-dir))))
+
+(defun flymake-straight-check-predicate (value)
+  "Check predicate VALUE."
+  (or (eq value t)
+      (if (functionp value)
+          (funcall value)
+        (and value
+             (flymake-straight-all-pass
+              value)))))
+
 (defun flymake-straight-enable-package-lint ()
-  "Enable package lint if available.
-See also `flymake-straight-package-lint-enable-p'."
-  (when (and
-         (flymake-straight-looks-like-package)
-         (or
-          (eq flymake-straight-package-lint-enable-p t)
-          (when (functionp flymake-straight-package-lint-enable-p)
-            (funcall flymake-straight-package-lint-enable-p))))
+  "Disable or enable package-lint.
+It depends on the vlaue of `flymake-straight-package-lint-predicate'."
+  (when (and (flymake-straight-looks-like-package)
+             (flymake-straight-check-predicate
+              flymake-straight-package-lint-predicate))
     (flymake-straight-fix-package-lint)
     (require 'package-lint-flymake nil t)
     (package-lint-flymake-setup)))
 
+
 (defun flymake-straight-configure-checkdoc ()
-  "Disable `elisp-flymake-checkdoc' and `package-lint-flymake' in not user file."
-  (unless (or (eq flymake-straight-checkdoc-lint-enable-p t)
-              (when (functionp flymake-straight-checkdoc-lint-enable-p)
-                (funcall flymake-straight-checkdoc-lint-enable-p)))
-    (remove-hook 'flymake-diagnostic-functions 'elisp-flymake-checkdoc t)))
+  "Disable or enable checkdoc depending on `flymake-straight-checkdoc-predicate'."
+  (let ((enabled (flymake-straight-check-predicate
+                  flymake-straight-checkdoc-predicate)))
+    (if (not enabled)
+        (remove-hook 'flymake-diagnostic-functions 'elisp-flymake-checkdoc t)
+      (when (not (memq 'elisp-flymake-checkdoc flymake-diagnostic-functions))
+        (add-hook 'flymake-diagnostic-functions 'elisp-flymake-checkdoc nil t)))))
 
 (defun flymake-straight--elisp-auto-setup ()
   "Enable and setup `flymake-mode' with different backends based on the filename.
-In `straight--repos-dir' the function will setup `package-lint-flymake',
-in `user-emacs-directory' replace `elisp-flymake-byte-compile' with
+
+In `straight--repos-dir' the function condionally enable or disable
+`package-lint-flymake' and `elisp-flymake-checkdoc'.
+
+See custom variables `flymake-straight-checkdoc-predicate' and
+`flymake-straight-package-lint-predicate'.
+
+In the `user-emacs-directory' replace `elisp-flymake-byte-compile' with
 `flymake-straight-elisp-flymake-byte-compile'."
   (remove-hook 'flymake-diagnostic-functions 'flymake-proc-legacy-flymake)
   (let ((buffname (buffer-name (current-buffer))))
@@ -358,8 +396,7 @@ in `user-emacs-directory' replace `elisp-flymake-byte-compile' with
                (member (file-name-extension buffer-file-name)
                        (list "elc")))
            nil)
-          ((when (fboundp 'straight--repos-dir)
-             (file-in-directory-p buffer-file-name (straight--repos-dir)))
+          ((flymake-straight-in-straight-dir)
            (flymake-straight-configure-checkdoc)
            (setq-local elisp-flymake-byte-compile-load-path
                        (append
@@ -375,8 +412,14 @@ in `user-emacs-directory' replace `elisp-flymake-byte-compile' with
 ;;;###autoload
 (defun flymake-straight-flymake-elisp-mode-init ()
   "Enable and setup `flymake-mode' with different backends based on the filename.
-In `straight--repos-dir' the function will setup `package-lint-flymake',
-in `user-emacs-directory' replace `elisp-flymake-byte-compile' with
+
+In `straight--repos-dir' the function condionally enable or disable
+`package-lint-flymake' and `elisp-flymake-checkdoc'.
+
+See custom variables `flymake-straight-checkdoc-predicate' and
+`flymake-straight-package-lint-predicate'.
+
+In the `user-emacs-directory' replace `elisp-flymake-byte-compile' with
 `flymake-straight-elisp-flymake-byte-compile'."
   (interactive)
   (flymake-straight--elisp-auto-setup))

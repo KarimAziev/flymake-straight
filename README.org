@@ -1,10 +1,37 @@
-A Flymake backend that integrate ~use-package~ and ~straight.el~.
+#+OPTIONS: ^:nil
 
-** Installation
+* About
+A Flymake backend that integrate use-package and straight.el.
 
-Emacs >= 26.1 is required.
+* Table of Contents                                       :TOC_2_gh:QUOTE:noexport:
+#+BEGIN_QUOTE
+- [[#about][About]]
+- [[#installation][Installation]]
+  - [[#with-use-package-and-straight][With ~use-package~ and ~straight~]]
+  - [[#manual-installation][Manual installation]]
+- [[#usage][Usage]]
+  - [[#auto-setup][Auto Setup]]
+  - [[#manual-setup][Manual setup]]
+#+END_QUOTE
 
-*** Manual
+* Installation
+
+| Name  | Version |
+|-------+---------|
+| Emacs |    26.1 |
+
+
+** With ~use-package~ and ~straight~
+#+begin_src elisp :eval no
+(use-package flymake-straight
+  :straight (flymake-straight
+             :repo "KarimAziev/flymake-straight"
+             :type git
+             :host github)
+	:hook (emacs-lisp-mode . flymake-straight-flymake-elisp-mode-init))
+#+end_src
+
+** Manual installation
 
 Download the source code and put it wherever you like, e.g. into =~/.emacs.d/flymake-straight/=
 
@@ -19,28 +46,29 @@ Add the downloaded directory to the load path:
 (require 'flymake-straight)
 #+end_src
 
-#+begin_src elisp :eval no
-(use-package flymake-straight
-  :straight (flymake-straight
-             :repo "KarimAziev/flymake-straight"
-             :type git
-             :host github)
-	:hook (emacs-lisp-mode . flymake-straight-flymake-elisp-mode-init))
-#+end_src
+* Usage
 
-** Commands
+** Auto Setup
 
-*** ~M-x flymake-straight-flymake-elisp-mode-init~
-Enable and setup =flymake-mode= in ~user-emacs-directory~ with either
-=flymake-straight-elisp-flymake-byte-compile= or =elisp-flymake-byte-compile=.
+**** ~flymake-straight-flymake-elisp-mode-init~
+Automatically setup backends =flymake-mode= depending on the filename.
 
-In user emacs files it will replace =elisp-flymake-byte-compile= with
-=flymake-straight-elisp-flymake-byte-compile=, which do the same, but also integrates straight.el.
+Inside =straight--repos-dir= it will enable/disable =package-lint-flymake= and =elisp-flymake-checkdoc=. See custom
+variables =flymake-straight-checkdoc-predicate= and =flymake-straight-package-lint-predicate=.
 
-Inside straight directories it will setup standart =elisp-flymake-byte-compile= with extended load-path and 
-possible =package-lint-flymake= if it is available and enabled in the custom variable
-~M-x flymake-straight-package-lint-enable-p~.
+In the user config files outside straight repositories, it will replace =elisp-flymake-byte-compile= with =flymake-straight-elisp-flymake-byte-compile=.
+*** Customization
+
+**** ~flymake-straight-checkdoc-predicate~
+Whether to enable =elisp-flymake-checkdoc= in straight directories. If the value is a function, it will be called without arguments and should return non nil if checkdoc should be enabled, othervise - disabled. If the value a list of functions, all predicates must returns non nil.
+**** ~flymake-straight-package-lint-predicate~
+Whether to enable =package-lint-flymake= in straight repositories. If the value is a function, it will be called without arguments and should return non nil if checkdoc should be enabled, othervise - disabled. If the value a list of functions, all predicates must returns non nil.
+**** ~flymake-straight-ignored-files~
+List of symbols or files to ignore.
+
+
+** Manual setup
+*** ~flymake-straight-off~
+Remove =flymake-straight-elisp-flymake-byte-compile= from flymake diagnostic. Also add =elisp-flymake-byte-compile= from diagnostic and reactivate =flymake-mode=.
 *** ~flymake-straight-on~
 Add =flymake-straight-elisp-flymake-byte-compile= to flymake diagnostic. Also remove =elisp-flymake-byte-compile= from diagnostic and reactivate =flymake-mode=.
-*** ~M-x flymake-straight-off~
-Remove =flymake-straight-elisp-flymake-byte-compile= from flymake diagnostic. Also add =elisp-flymake-byte-compile= from diagnostic and reactivate =flymake-mode=.
