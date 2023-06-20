@@ -55,6 +55,7 @@
                                          load-file-name buffer-file-name))
 
 (declare-function lm-get-header-re "lisp-mnt")
+(declare-function lm-header-multiline "lisp-mnt")
 (declare-function straight-use-package "straight.el")
 (declare-function straight--repos-dir "straight.el")
 (declare-function straight-use-package-mode "straight.el")
@@ -74,9 +75,18 @@
   :group 'flymake-straight
   :type '(repeat (symbol :tag "Feature")))
 
-(defcustom flymake-straight-package-lint-enable-p t
+(defcustom flymake-straight-package-lint-enable-p 'flymake-straight-user-mail-package-author-p
   "Whether to run setup `package-lint-flymake' in straight repositories.
 If the value is a function it will be called without arguments."
+  :group 'flymake-straight
+  :type '(choice
+          (boolean :tag "Start if available" t)
+          (function :tag "Custom function")))
+
+(defcustom flymake-straight-checkdoc-lint-enable-p 'flymake-straight-user-mail-package-author-p
+  "Predicate for `elisp-flymake-checkdoc'.
+If the value is a function it will be called without arguments and should return
+nil if checkdoc should be disabled."
   :group 'flymake-straight
   :type '(choice
           (boolean :tag "Start if available" t)
@@ -163,7 +173,7 @@ OUTPUT-BUFFER containing the diagnostics."
   "Return Emacs arguments to compile and check a file TEMP-FILE."
   `(,(expand-file-name invocation-name invocation-directory)
     "--batch"
-    "--eval" "(setq load-prefer-newer t)"
+    ;; "--eval" "(setq load-prefer-newer t)"
     ,@(mapcan (lambda (path)
                 (list "-L" path))
               (append (list "./")
@@ -217,8 +227,9 @@ REPORT-FN when done."
                 (cond ((not
                         (and (buffer-live-p source-buffer)
                              (eq proc
-                                 (with-current-buffer source-buffer
-                                   flymake-straight-elisp-flymake--byte-compile-process))))
+                                 (buffer-local-value
+                                  'flymake-straight-elisp-flymake--byte-compile-process
+                                  source-buffer))))
                        (flymake-log :warning
                                     "flymake straight: byte-compile process %s obsolete"
                                     proc))
@@ -292,27 +303,48 @@ Also add `elisp-flymake-byte-compile' from diagnostic and reactivate
       (package-initialize t)
       (package-refresh-contents t))))
 
+(defun flymake-straight-looks-like-package ()
+  "Return non nil whether current buffer has package headers."
+  (save-match-data
+    (save-excursion
+      (save-restriction
+        (require 'lisp-mnt)
+        (widen)
+        (goto-char (point-min))
+        (re-search-forward
+         (lm-get-header-re (rx (or "Version" "Package-Version"
+                                   "Package-Requires")))
+         nil t)))))
+
+(defun flymake-straight-user-mail-package-author-p ()
+  "Return non nil if `user-mail-address' is listed in package header's author.
+If `user-mail-address' is nil, return t."
+  (or (not user-mail-address)
+      (save-match-data
+        (seq-find
+         (apply-partially #'string-match-p (regexp-quote
+                                            user-mail-address))
+         (lm-header-multiline "Author")))))
+
 (defun flymake-straight-enable-package-lint ()
   "Enable package lint if available.
 See also `flymake-straight-package-lint-enable-p'."
   (when (and
+         (flymake-straight-looks-like-package)
          (or
           (eq flymake-straight-package-lint-enable-p t)
           (when (functionp flymake-straight-package-lint-enable-p)
-            (funcall flymake-straight-package-lint-enable-p)))
-         (save-match-data
-           (save-excursion
-             (save-restriction
-               (require 'lisp-mnt)
-               (widen)
-               (goto-char (point-min))
-               (re-search-forward
-                (lm-get-header-re (rx (or "Version" "Package-Version"
-                                          "Package-Requires")))
-                nil t)))))
+            (funcall flymake-straight-package-lint-enable-p))))
     (flymake-straight-fix-package-lint)
     (require 'package-lint-flymake nil t)
     (package-lint-flymake-setup)))
+
+(defun flymake-straight-configure-checkdoc ()
+  "Disable `elisp-flymake-checkdoc' and `package-lint-flymake' in not user file."
+  (unless (or (eq flymake-straight-checkdoc-lint-enable-p t)
+              (when (functionp flymake-straight-checkdoc-lint-enable-p)
+                (funcall flymake-straight-checkdoc-lint-enable-p)))
+    (remove-hook 'flymake-diagnostic-functions 'elisp-flymake-checkdoc t)))
 
 (defun flymake-straight--elisp-auto-setup ()
   "Enable and setup `flymake-mode' with different backends based on the filename.
@@ -328,6 +360,7 @@ in `user-emacs-directory' replace `elisp-flymake-byte-compile' with
            nil)
           ((when (fboundp 'straight--repos-dir)
              (file-in-directory-p buffer-file-name (straight--repos-dir)))
+           (flymake-straight-configure-checkdoc)
            (setq-local elisp-flymake-byte-compile-load-path
                        (append
                         elisp-flymake-byte-compile-load-path
