@@ -75,6 +75,17 @@
   :group 'flymake-straight
   :type '(repeat (symbol :tag "Feature")))
 
+(defcustom flymake-straight-user-emails '(flymake-straight-git-config-mail)
+  "List of user email authors or functions that return it.
+It is used by `flymake-straight-user-mail-package-author-p'."
+  :type '(repeat
+          (radio
+           (string :tag "Email")
+           (function-item :tag "Use email from git config"
+                          flymake-straight-git-config-mail)
+           (function :tag "Custom function")))
+  :group 'flymake-straight)
+
 (defcustom flymake-straight-package-lint-predicate '(flymake-straight-user-mail-package-author-p)
   "Whether to enable `package-lint-flymake' in straight repositories.
 
@@ -334,15 +345,25 @@ Return t if every one of the provided predicates is satisfied by provided
              (unless (funcall filter)
                (throw 'found t))))))
 
+
+(defun flymake-straight-git-config-mail ()
+  "Return user email from git config."
+  (ignore-errors (car (process-lines "git" "config" "user.email"))))
+
 (defun flymake-straight-user-mail-package-author-p ()
-  "Return non nil if `user-mail-address' is listed in package header's author.
-If `user-mail-address' is nil, return t."
-  (or (not user-mail-address)
-      (save-match-data
-        (seq-find
-         (apply-partially #'string-match-p (regexp-quote
-                                            user-mail-address))
-         (lm-header-multiline "Author")))))
+  "Return non nil if current git user is listed in package header's author."
+  (when-let ((header (lm-header-multiline "Author")))
+    (catch 'found
+      (dolist (mail flymake-straight-user-emails)
+        (when-let ((str
+                    (pcase mail
+                      ((pred functionp)
+                       (funcall mail))
+                      (_
+                       mail))))
+          (when (seq-find (apply-partially #'string-match-p (regexp-quote str))
+                          header)
+            (throw 'found t)))))))
 
 (defun flymake-straight-in-straight-dir ()
   "Return non if current file is in `straight--repos-dir'."
@@ -374,9 +395,9 @@ It depends on the vlaue of `flymake-straight-package-lint-predicate'."
   (let ((enabled (flymake-straight-check-predicate
                   flymake-straight-checkdoc-predicate)))
     (if (not enabled)
-        (remove-hook 'flymake-diagnostic-functions 'elisp-flymake-checkdoc t)
+        (remove-hook 'flymake-diagnostic-functions #'elisp-flymake-checkdoc t)
       (when (not (memq 'elisp-flymake-checkdoc flymake-diagnostic-functions))
-        (add-hook 'flymake-diagnostic-functions 'elisp-flymake-checkdoc nil t)))))
+        (add-hook 'flymake-diagnostic-functions #'elisp-flymake-checkdoc nil t)))))
 
 (defun flymake-straight--elisp-auto-setup ()
   "Enable and setup `flymake-mode' with different backends based on the filename.
@@ -389,7 +410,7 @@ See custom variables `flymake-straight-checkdoc-predicate' and
 
 In the `user-emacs-directory' replace `elisp-flymake-byte-compile' with
 `flymake-straight-elisp-flymake-byte-compile'."
-  (remove-hook 'flymake-diagnostic-functions 'flymake-proc-legacy-flymake)
+  (remove-hook 'flymake-diagnostic-functions #'flymake-proc-legacy-flymake)
   (let ((buffname (buffer-name (current-buffer))))
     (cond ((string= buffname "*Pp Eval Output*"))
           ((or (not buffer-file-name)
