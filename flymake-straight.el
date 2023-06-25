@@ -352,6 +352,7 @@ Return t if every one of the provided predicates is satisfied by provided
 
 (defun flymake-straight-user-mail-package-author-p ()
   "Return non nil if current git user is listed in package header's author."
+  (require 'lisp-mnt)
   (when-let ((header (lm-header-multiline "Author")))
     (catch 'found
       (dolist (mail flymake-straight-user-emails)
