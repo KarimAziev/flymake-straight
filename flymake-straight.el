@@ -6,7 +6,7 @@
 ;; URL: https://github.com/KarimAziev/flymake-straight
 ;; Version: 0.1.0
 ;; Keywords: lisp local
-;; Package-Requires: ((emacs "26.1"))
+;; Package-Requires: ((emacs "28.1"))
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;; This file is NOT part of GNU Emacs.
@@ -430,6 +430,105 @@ In the `user-emacs-directory' replace `elisp-flymake-byte-compile' with
                 (not (member (file-name-base buffer-file-name)
                              flymake-straight-ignored-files)))
            (flymake-straight-setup-on)))))
+
+(defun flymake-straight-current-project-root ()
+  "Return project root directory."
+  (when-let ((project (project-current)))
+    (if (fboundp 'project-root)
+        (project-root project)
+      (with-no-warnings
+        (car (project-roots project))))))
+
+(defun flymake-straight-batch-with-every-file (fn files &optional kill-flag)
+  "Call FN with every item from FILES and show PROGRESS-MESSAGE.
+If KILL-FLAG is non nil, kill unmodified buffers."
+  (save-some-buffers)
+  (let ((max (length files))
+        (percent 0))
+    (dotimes (k max)
+      (let ((file (nth k files)))
+        (when (file-exists-p file)
+          (setq percent (round (/ (* 100 k) max)))
+          (message "%d of %d (%d%%) processing %s"
+                   k
+                   max
+                   percent (file-name-base file))
+          (delay-mode-hooks
+            (let ((buff (get-file-buffer file))
+                  (buff-to-kill))
+              (unless buff
+                (setq buff-to-kill
+                      (let ((inhibit-message t))
+                        (find-file-noselect file t))))
+              (with-current-buffer (or buff buff-to-kill)
+                (funcall fn)
+                (when (buffer-modified-p)
+                  (message "File %s modified" file)
+                  (save-buffer)))
+              (when (and kill-flag buff-to-kill)
+                (kill-buffer buff-to-kill)))))))))
+
+
+(defun flymake-straight-get-user-emacs-files ()
+  "Return elisp files from user configuration."
+  (let* ((default-directory user-emacs-directory)
+         (project-current-directory-override user-emacs-directory)
+         (project-find-functions '(project-try-vc try))
+         (pr (project-current nil default-directory))
+         (dirs (list (project-root pr))))
+    (seq-filter
+     (lambda (f)
+       (and
+        (file-exists-p f)
+        (equal (file-name-extension f) "el")))
+     (project-files pr dirs))))
+
+(defun flymake-straight-get-all-buffers-in-dir (directory)
+  "Return list of buffers in DIRECTORY."
+  (seq-filter
+   (lambda (file)
+     (and (buffer-file-name file)
+          (file-in-directory-p file directory)))
+   (buffer-list)))
+
+(defun flymake-straight-kill-all-buffers-in-straight ()
+  "Return list of buffers in DIRECTORY."
+  (dolist (buff (flymake-straight-get-all-buffers-in-dir
+                 (when (fboundp 'straight--dir)
+                   (straight--dir))))
+    (unless (buffer-modified-p buff)
+      (kill-buffer buff))))
+
+;;;###autoload
+(defun flymake-straight-check-all-emacs-files-modules ()
+  "Fix modules directory in user `emacs' directory."
+  (interactive)
+  (redisplay)
+  (require 'flymake)
+  (flymake-straight-kill-all-buffers-in-straight)
+  (let* ((sdir
+          (when (fboundp 'straight--dir)
+            (straight--dir)))
+         (emdirs (seq-filter (lambda (dir)
+                               (and
+                                (file-in-directory-p dir user-emacs-directory)
+                                (or (not sdir)
+                                    (not (file-in-directory-p dir sdir)))))
+                             load-path))
+         (files (seq-filter (lambda (file)
+                              (seq-find
+                               (apply-partially #'file-in-directory-p file)
+                               emdirs))
+                            (flymake-straight-get-user-emacs-files))))
+    (when (fboundp 'flymake-start)
+      (flymake-straight-batch-with-every-file
+       (lambda ()
+         (flymake-straight-setup-on)
+         (flymake-start nil t))
+       files)
+      (let ((default-directory user-emacs-directory)
+            (project-current-directory-override user-emacs-directory))
+        (flymake-show-project-diagnostics)))))
 
 ;;;###autoload
 (defun flymake-straight-flymake-elisp-mode-init ()
