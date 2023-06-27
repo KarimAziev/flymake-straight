@@ -488,7 +488,7 @@ If KILL-FLAG is non nil, kill unmodified buffers."
   (seq-filter
    (lambda (file)
      (and (buffer-file-name file)
-          (file-in-directory-p file directory)))
+          (file-in-directory-p (buffer-file-name file) directory)))
    (buffer-list)))
 
 (defun flymake-straight-kill-all-buffers-in-straight ()
