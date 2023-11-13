@@ -6,7 +6,7 @@
 ;; URL: https://github.com/KarimAziev/flymake-straight
 ;; Version: 0.1.0
 ;; Keywords: lisp local
-;; Package-Requires: ((emacs "28.1"))
+;; Package-Requires: ((emacs "29.1"))
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;; This file is NOT part of GNU Emacs.
@@ -472,6 +472,7 @@ If KILL-FLAG is non nil, kill unmodified buffers."
 (defun flymake-straight-get-user-emacs-files ()
   "Return elisp files from user configuration."
   (let* ((default-directory user-emacs-directory)
+         (project-vc-include-untracked nil)
          (project-current-directory-override user-emacs-directory)
          (project-find-functions '(project-try-vc try))
          (pr (project-current nil default-directory))
@@ -480,7 +481,8 @@ If KILL-FLAG is non nil, kill unmodified buffers."
      (lambda (f)
        (and
         (file-exists-p f)
-        (equal (file-name-extension f) "el")))
+        (equal (file-name-extension f) "el")
+        (not (equal dir-locals-file (file-name-nondirectory f)))))
      (project-files pr dirs))))
 
 (defun flymake-straight-get-all-buffers-in-dir (directory)
