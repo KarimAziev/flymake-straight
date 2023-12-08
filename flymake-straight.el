@@ -187,7 +187,7 @@ OUTPUT-BUFFER containing the diagnostics."
                                (1- beg) beg)
                            end
                            level
-                           string)))))) )
+                           string)))))))
 
 (defun flymake-straight-get-args (temp-file)
   "Return Emacs arguments to compile and check a file TEMP-FILE."
@@ -269,6 +269,7 @@ REPORT-FN when done."
 
 (defun flymake-straight-setup-on ()
   "Add `flymake-straight-elisp-flymake-byte-compile' to flymake diagnostic.
+
 Also remove `elisp-flymake-byte-compile' from diagnostic and reactivate
 `flymake-mode'."
   (if (bound-and-true-p flymake-mode)
@@ -282,7 +283,8 @@ Also remove `elisp-flymake-byte-compile' from diagnostic and reactivate
 
 ;;;###autoload
 (defun flymake-straight-on ()
-  "Add `flymake-straight-elisp-flymake-byte-compile' to flymake diagnostic.
+  "Turn on `flymake-straight-elisp-flymake-byte-compile' in flymake diagnostic.
+
 Also remove `elisp-flymake-byte-compile' from diagnostic and reactivate
 `flymake-mode'."
   (interactive)
@@ -305,6 +307,7 @@ Also add `elisp-flymake-byte-compile' from diagnostic and reactivate
 ;;;###autoload
 (defun flymake-straight-off ()
   "Remove `flymake-straight-elisp-flymake-byte-compile' from flymake diagnostic.
+
 Also add `elisp-flymake-byte-compile' from diagnostic and reactivate
 `flymake-mode'."
   (interactive)
@@ -382,6 +385,7 @@ Return t if every one of the provided predicates is satisfied by provided
 
 (defun flymake-straight-enable-package-lint ()
   "Disable or enable package-lint.
+
 It depends on the vlaue of `flymake-straight-package-lint-predicate'."
   (when (and (flymake-straight-looks-like-package)
              (flymake-straight-check-predicate
@@ -486,7 +490,7 @@ If KILL-FLAG is non nil, kill unmodified buffers."
      (project-files pr dirs))))
 
 (defun flymake-straight-get-all-buffers-in-dir (directory)
-  "Return list of buffers in DIRECTORY."
+  "Return list of file buffers in DIRECTORY."
   (seq-filter
    (lambda (file)
      (and (buffer-file-name file)
@@ -494,7 +498,7 @@ If KILL-FLAG is non nil, kill unmodified buffers."
    (buffer-list)))
 
 (defun flymake-straight-kill-all-buffers-in-straight ()
-  "Return list of buffers in DIRECTORY."
+  "Kill all unmodified buffers in a straight directory."
   (dolist (buff (flymake-straight-get-all-buffers-in-dir
                  (when (fboundp 'straight--dir)
                    (straight--dir))))
@@ -534,9 +538,9 @@ If KILL-FLAG is non nil, kill unmodified buffers."
 
 ;;;###autoload
 (defun flymake-straight-flymake-elisp-mode-init ()
-  "Enable and setup `flymake-mode' with different backends based on the filename.
+  "Initialize Flymake for Emacs Lisp with custom settings.
 
-In `straight--repos-dir' the function condionally enable or disable
+In `straight--repos-dir' this command will condionally enable or disable
 `package-lint-flymake' and `elisp-flymake-checkdoc'.
 
 See custom variables `flymake-straight-checkdoc-predicate' and
