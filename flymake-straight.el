@@ -415,7 +415,8 @@ See custom variables `flymake-straight-checkdoc-predicate' and
 
 In the `user-emacs-directory' replace `elisp-flymake-byte-compile' with
 `flymake-straight-elisp-flymake-byte-compile'."
-  (remove-hook 'flymake-diagnostic-functions #'flymake-proc-legacy-flymake)
+  (when (fboundp 'flymake-proc-legacy-flymake)
+    (remove-hook 'flymake-diagnostic-functions #'flymake-proc-legacy-flymake))
   (let ((buffname (buffer-name (current-buffer))))
     (cond ((string= buffname "*Pp Eval Output*"))
           ((or (not buffer-file-name)
