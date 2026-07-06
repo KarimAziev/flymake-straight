@@ -86,7 +86,17 @@ It is used by `flymake-straight-user-mail-package-author-p'."
            (function :tag "Custom function")))
   :group 'flymake-straight)
 
-(defcustom flymake-straight-package-lint-predicate '(flymake-straight-user-mail-package-author-p)
+(defvar flymake-straight--package-function-choices
+  (mapcar (lambda (it) `(function-item
+                         ,it))
+          '(flymake-straight-user-repo-p
+            flymake-straight-user-mail-package-maintainer-p
+            flymake-straight-user-mail-package-author-p
+            flymake-straight-check-user-commits-p)))
+
+
+
+(defcustom flymake-straight-package-lint-predicate '(flymake-straight-user-repo-p)
   "Whether to enable `package-lint-flymake' in straight repositories.
 
 If the value is a function, it will be called without arguments and should
@@ -94,12 +104,15 @@ return non nil if checkdoc should be enabled, othervise - disabled.
 
 If the value a list of functions, all predicates must returns non nil."
   :group 'flymake-straight
-  :type '(choice
+  :type `(radio
           (boolean :tag "Start if available" t)
+          ,@flymake-straight--package-function-choices
           (function :tag "Function predicate")
-          (repeat (function :tag "List of predicates"))))
+          (repeat
+           (radio ,@flymake-straight--package-function-choices
+            (function :tag "List of predicates")))))
 
-(defcustom flymake-straight-checkdoc-predicate '(flymake-straight-user-mail-package-author-p)
+(defcustom flymake-straight-checkdoc-predicate 'flymake-straight-user-repo-p
   "Whether to enable `elisp-flymake-checkdoc' in straight directories.
 
 If the value is a function, it will be called without arguments and should
@@ -107,10 +120,13 @@ return non nil if checkdoc should be enabled, othervise - disabled.
 
 If the value a list of functions, all predicates must returns non nil."
   :group 'flymake-straight
-  :type '(choice
+  :type `(radio
           (boolean :tag "Start if available" t)
+          ,@flymake-straight--package-function-choices
           (function :tag "Function predicate")
-          (repeat (function :tag "Function predicate"))))
+          (repeat
+           (radio ,@flymake-straight--package-function-choices
+            (function :tag "List of predicates")))))
 
 (defun flymake-straight--batch-compile-for-flymake (&optional file)
   "Helper for `flymake-straight-elisp-flymake-byte-compile'.
@@ -353,21 +369,116 @@ Return t if every one of the provided predicates is satisfied by provided
   "Return user email from git config."
   (ignore-errors (car (process-lines "git" "config" "user.email"))))
 
-(defun flymake-straight-user-mail-package-author-p ()
-  "Return non nil if current git user is listed in package header's author."
+(defun flymake-straight--header-comment-includes-p (header &optional items)
+  "Check whether HEADER's multiline comment includes any item.
+
+Argument HEADER is the header name passed to `lm-header-multiline'.
+
+Optional argument ITEMS is a list of strings or nullary functions
+returning strings to find in HEADER; it defaults to nil."
   (require 'lisp-mnt)
-  (when-let* ((header (lm-header-multiline "Author")))
+  (when-let* ((header (lm-header-multiline header)))
     (catch 'found
-      (dolist (mail flymake-straight-user-emails)
+      (dolist (mail items)
         (when-let* ((str
-                    (pcase mail
-                      ((pred functionp)
-                       (funcall mail))
-                      (_
-                       mail))))
+                     (pcase mail
+                       ((pred functionp)
+                        (funcall mail))
+                       (_
+                        mail))))
           (when (seq-find (apply-partially #'string-match-p (regexp-quote str))
                           header)
             (throw 'found t)))))))
+
+(defun flymake-straight--resolve-maybe-functions (items)
+  "Return ITEMS with functions resolved and nil values removed.
+
+Argument ITEMS is a list of values or functions to resolve."
+  (delq nil (mapcar (lambda (it)
+                      (pcase it
+                        ((pred functionp)
+                         (funcall it))
+                        (_
+                         it)))
+                    items)))
+
+(defun flymake-straight--header-with-user-url-p (header &optional mails)
+  "Return non-nil if HEADER contains any string from MAILS.
+
+Argument HEADER is the file header name whose multiline contents are
+searched.
+
+Optional argument MAILS is a list of strings or nullary functions
+returning strings to match against HEADER; it defaults to nil."
+  (require 'lisp-mnt)
+  (when-let* ((header (lm-header-multiline header)))
+    (catch 'found
+      (dolist (mail mails)
+        (when-let* ((str
+                     (pcase mail
+                       ((pred functionp)
+                        (funcall mail))
+                       (_
+                        mail))))
+          (when (seq-find (apply-partially #'string-match-p (regexp-quote str))
+                          header)
+            (throw 'found t)))))))
+
+(defun flymake-straight-user-mail-package-author-p (&optional emails)
+  "Check whether the Author header includes a user email.
+
+Optional argument EMAILS is a list of email strings or functions
+returning email strings; it defaults to `flymake-straight-user-emails'."
+  (flymake-straight--header-comment-includes-p "Author"
+                                               (or emails
+                                                   flymake-straight-user-emails)))
+
+(defun flymake-straight-user-mail-package-maintainer-p (&optional emails)
+  "Check whether the Maintainer header includes a user email.
+
+Optional argument EMAILS is a list of email strings or functions
+returning email strings; it defaults to
+`flymake-straight-user-emails'."
+  (flymake-straight--header-comment-includes-p "Maintainer"
+                                               (or emails
+                                                   flymake-straight-user-emails)))
+(defun flymake-straight-check-user-commits-p (&optional emails)
+  "Check whether any user email appears in Git commit authors.
+
+Optional argument EMAILS is a list of email strings or nullary
+functions returning email strings; it defaults to
+`flymake-straight-user-emails'."
+  (flymake-straight--check-emails-commits-p (or emails
+                                                flymake-straight-user-emails)))
+
+(defun flymake-straight--check-emails-commits-p (&optional emails)
+  "Check whether any email appears in Git commit authors.
+
+Optional argument EMAILS is a list of email strings or nullary
+functions returning email strings; it defaults to nil."
+  (let ((authors (ignore-errors
+                   (process-lines "git" "log" "--all" "--format=%ae%n%ce"))))
+    (catch 'found
+      (dolist (item emails)
+        (when-let* ((str
+                     (pcase item
+                       ((pred functionp)
+                        (funcall item))
+                       (_ item))))
+          (when (member str authors)
+            (throw 'found t)))))))
+
+(defun flymake-straight-user-repo-p ()
+  "Check whether a user email matches package headers or commit authors."
+  (when-let* ((mails (flymake-straight--resolve-maybe-functions
+                      flymake-straight-user-emails)))
+    (or (flymake-straight-user-mail-package-author-p mails)
+        (flymake-straight-user-mail-package-maintainer-p mails)
+        (flymake-straight--check-emails-commits-p mails))))
+
+
+
+
 
 (defun flymake-straight-in-straight-dir ()
   "Return non if current file is in `straight--repos-dir'."
